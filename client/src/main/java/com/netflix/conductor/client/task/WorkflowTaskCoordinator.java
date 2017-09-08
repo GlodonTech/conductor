@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,6 +59,8 @@ public class WorkflowTaskCoordinator {
 	private int updateRetryCount;
 	
 	private int workerQueueSize;
+
+	private LinkedBlockingQueue<Runnable> workerQueue;
 	
 	private int threadCount;
 	
@@ -88,6 +89,7 @@ public class WorkflowTaskCoordinator {
 		this.sleepWhenRetry = sleepWhenRetry;
 		this.updateRetryCount = updateRetryCount;
 		this.workerQueueSize = workerQueueSize;
+		this.workerQueue = new LinkedBlockingQueue<Runnable>(workerQueueSize);
 		for (Worker worker : taskWorkers) {
 			workers.add(worker);
 		}
@@ -231,7 +233,7 @@ public class WorkflowTaskCoordinator {
 		AtomicInteger count = new AtomicInteger(0);
 		this.es = new ThreadPoolExecutor(threadCount, threadCount,
                 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<Runnable>(workerQueueSize),
+                workerQueue,
                 new ThreadFactory() {
 
 			@Override
@@ -267,18 +269,18 @@ public class WorkflowTaskCoordinator {
 		logger.debug("Polling {}, domain={}, count = {} timeout = {} ms", worker.getTaskDefName(), domain, worker.getPollCount(), worker.getLongPollTimeoutInMS());
 		
 		try{
-			
-			String taskType = worker.getTaskDefName();
-            List<Task> tasks = Lists.newArrayList();
-            ThreadPoolExecutor threadPoolExecutor = (ThreadPoolExecutor) es;
-            int pollCount = threadPoolExecutor.getMaximumPoolSize() - threadPoolExecutor.getActiveCount();
-            pollCount = pollCount < worker.getPollCount() ? pollCount : worker.getPollCount();
-            if (pollCount > 0) {
-                Stopwatch sw = WorkflowTaskMetrics.pollTimer(worker.getTaskDefName());
-                tasks = client.poll(taskType, domain, worker.getIdentity(), pollCount, worker.getLongPollTimeoutInMS());
-                sw.stop();
-                logger.debug("Polled {}, for domain {} and receivd {} tasks", worker.getTaskDefName(), domain, tasks.size());
+
+            // get the remaining free size of worker queue, prevent throwing queue full exception
+            int realPollCount = Math.min(this.workerQueueSize - workerQueue.size(), worker.getPollCount());
+            if (realPollCount <= 0) {
+				logger.warn("All workers are busy, not polling.  queue size {}, max {}", workerQueue.size(), workerQueueSize);
+				return;
             }
+			String taskType = worker.getTaskDefName();
+			Stopwatch sw = WorkflowTaskMetrics.pollTimer(worker.getTaskDefName());
+			List<Task> tasks = client.poll(taskType, domain, worker.getIdentity(), realPollCount, worker.getLongPollTimeoutInMS());
+            sw.stop();
+            logger.debug("Polled {}, for domain {} and received {} tasks", worker.getTaskDefName(), domain, tasks.size());
             for(Task task : tasks) {
 				es.submit(() -> {
 					try {
