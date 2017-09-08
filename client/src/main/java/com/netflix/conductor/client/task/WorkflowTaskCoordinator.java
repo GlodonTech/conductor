@@ -270,8 +270,8 @@ public class WorkflowTaskCoordinator {
 		
 		try{
 
-            // get the remaining free size of worker queue, prevent throwing queue full exception
-            int realPollCount = Math.min(this.workerQueueSize - workerQueue.size(), worker.getPollCount());
+            // get the remaining capacity of worker queue to prevent queue full exception
+            int realPollCount = Math.min(workerQueue.remainingCapacity(), worker.getPollCount());
             if (realPollCount <= 0) {
 				logger.warn("All workers are busy, not polling.  queue size {}, max {}", workerQueue.size(), workerQueueSize);
 				return;
