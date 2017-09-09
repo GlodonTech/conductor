@@ -89,7 +89,6 @@ public class WorkflowTaskCoordinator {
 		this.sleepWhenRetry = sleepWhenRetry;
 		this.updateRetryCount = updateRetryCount;
 		this.workerQueueSize = workerQueueSize;
-		this.workerQueue = new LinkedBlockingQueue<Runnable>(workerQueueSize);
 		for (Worker worker : taskWorkers) {
 			workers.add(worker);
 		}
@@ -229,8 +228,9 @@ public class WorkflowTaskCoordinator {
 		}
 		
 		logger.info("Initialized the worker with {} threads", threadCount);
-		
-		AtomicInteger count = new AtomicInteger(0);
+
+        this.workerQueue = new LinkedBlockingQueue<Runnable>(workerQueueSize);
+        AtomicInteger count = new AtomicInteger(0);
 		this.es = new ThreadPoolExecutor(threadCount, threadCount,
                 0L, TimeUnit.MILLISECONDS,
                 workerQueue,
